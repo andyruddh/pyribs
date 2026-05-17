@@ -1,7 +1,7 @@
 """Runs various QD algorithms on the sphere linear projection benchmark.
 
 Install the following dependencies before running this example:
-    pip install ribs[visualize] torch tqdm fire loguru tabulate
+    pip install ribs[visualize] torch "zuko>=1.0.0" tqdm fire loguru tabulate
 
 The sphere function in this example is adapted from Section 4 of Fontaine 2020
 (https://arxiv.org/abs/1912.02400). Namely, each solution value is clipped to the range
@@ -76,10 +76,12 @@ Novelty Search:
   that is fed to the EvolutionStrategyEmitter just like in CMA-ME.
 
 DDS:
-- `dds`: Density Descent Search (Lee 2024; https://arxiv.org/abs/2312.11331) with a KDE
-  as the density estimator. Uses DensityArchive and EvolutionStrategyEmitter with
+- `dds_kde`: Density Descent Search (Lee 2024; https://arxiv.org/abs/2312.11331) with a
+  KDE as the density estimator. Uses DensityArchive and EvolutionStrategyEmitter with
   DensityRanker.
 - `dds_kde_sklearn`: Density Descent Search using scikit-learn's KernelDensity as the
+  density estimator.
+- `dds_cnf`: Density Descent Search using a Continuous Normalizing Flow (CNF) as the
   density estimator.
 
 DMS:
@@ -803,7 +805,7 @@ CONFIG = {
         },
     },
     ## DDS ##
-    "dds": {
+    "dds_kde": {
         # Hyperparameters from DDS paper: https://arxiv.org/abs/2312.11331
         "is_dqd": False,
         # In DDS, the DensityArchive does not store any solutions, so emitters
@@ -858,6 +860,48 @@ CONFIG = {
                 "bandwidth": 25.6,
                 "sklearn_kwargs": {
                     "kernel": "gaussian",
+                },
+            },
+        },
+        "result_archive": {
+            "class": GridArchive,
+            "kwargs": {
+                "dims": (100, 100),
+            },
+        },
+        "emitters": [
+            {
+                "class": EvolutionStrategyEmitter,
+                "kwargs": {
+                    "sigma0": 1.5,
+                    "ranker": "density",
+                    "selection_rule": "mu",
+                    "restart_rule": "basic",
+                    "batch_size": 36,
+                },
+                "num_emitters": 15,
+            }
+        ],
+        "scheduler": {
+            "class": Scheduler,
+            "kwargs": {},
+        },
+    },
+    "dds_cnf": {
+        # Hyperparameters from DDS paper: https://arxiv.org/abs/2312.11331
+        "is_dqd": False,
+        # In DDS, the DensityArchive does not store any solutions, so emitters
+        # must use the result archive instead.
+        "pass_result_archive_to_emitters": True,
+        "archive": {
+            "class": DensityArchive,
+            "kwargs": {
+                "buffer_size": 10000,
+                "density_method": "cnf",
+                "cnf_train_steps": 5,
+                "cnf_batch_size": 32,
+                "cnf_kwargs": {
+                    "hidden_features": (64, 64),
                 },
             },
         },
@@ -1063,9 +1107,13 @@ def create_scheduler(
             **config["archive"]["kwargs"],
         )
     elif archive_class == DensityArchive:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         archive = archive_class(
             measure_dim=len(bounds),
             seed=seed,
+            # The device is simply ignored if we are running dds_kde.
+            cnf_device=device,
             **config["archive"]["kwargs"],
         )
     elif archive_class == DiscountArchive:
@@ -1330,7 +1378,7 @@ def sphere_main(
     with (outdir / "metrics.json").open("w") as file:
         json.dump(metrics, file, indent=2)
 
-    # Return a summary of metrics.
+    # Return a summary of metrics. Note that Fire automatically prints these to stdout.
     return {
         "QD Score": metrics["QD Score"]["y"][-1],
         "Coverage": metrics["Coverage"]["y"][-1],

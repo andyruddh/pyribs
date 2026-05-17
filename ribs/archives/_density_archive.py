@@ -220,10 +220,11 @@ class DensityArchive(ArchiveBase):
 
     This archive originates in Density Descent Search in `Lee 2024
     <https://dl.acm.org/doi/10.1145/3638529.3654001>`_. It maintains a buffer of
-    measures, and using that buffer, it builds a density estimator such as a KDE. The
-    density estimator indicates which areas of measure space have, for instance, a high
-    density of solutions -- to improve exploration, an algorithm would need to target
-    areas with a low density of solutions.
+    measures, and using that buffer, it builds a density estimator such as a `KDE
+    <https://en.wikipedia.org/wiki/Kernel_density_estimation>`_. The density estimator
+    indicates which areas of measure space have, for instance, a high density of
+    solutions -- to improve exploration, an algorithm would need to target areas with a
+    low density of solutions.
 
     Incoming solutions are added to the buffer with `reservoir sampling
     <https://en.wikipedia.org/wiki/Reservoir_sampling>`_, specifically as described in
@@ -242,6 +243,16 @@ class DensityArchive(ArchiveBase):
         <https://pytorch.org/>`_ and `Zuko <https://zuko.readthedocs.io/>`_ to be
         installed, e.g., by running ``pip install torch zuko>=1.0.0``.
 
+    .. note::
+
+        For DDS-CNF, the default ``cnf`` parameters, particularly ``cnf_kwargs``,
+        ``cnf_train_steps``, and ``cnf_batch_size``, are tuned to provide reasonable
+        performance on the Sphere example (:doc:`/examples/sphere`). Further tuning may
+        be needed for new domains. Additionally, these parameters are intended to reduce
+        the computational cost of DDS-CNF when compared to the original parameters in
+        `Lee 2024 <https://dl.acm.org/doi/10.1145/3638529.3654001>`_. See :pr:`707` for
+        more info.
+
     Args:
         measure_dim: Dimension of the measure space.
         buffer_size: Size of the buffer of measures.
@@ -259,21 +270,20 @@ class DensityArchive(ArchiveBase):
         sklearn_kwargs: kwargs for :class:`sklearn.neighbors.KernelDensity` when using
             ``"kde_sklearn"`` as the ``density_method``. Note that bandwidth is already
             passed in via the ``bandwidth`` parameter above.
-        cnf_kwargs: Additional keyword arguments forwarded to :class:`zuko.flows.CNF`
-            when ``density_method="cnf"``. ``features`` is set automatically from
-            ``measure_dim`` and cannot be overridden. Defaults to ``{"hidden_features":
-            (64, 64)}``.
+        cnf_kwargs: Additional keyword arguments forwarded to
+            :class:`zuko.flows.continuous.CNF` when ``density_method="cnf"``.
+            ``features`` is set automatically from ``measure_dim`` and cannot be
+            overridden. Defaults to ``{"hidden_features": (64, 64)}``.
         cnf_lr: Adam learning rate used to fine-tune the CNF during each call to
-            :meth:`add` when ``density_method="cnf"``. Defaults to ``1e-3``.
+            :meth:`add` when ``density_method="cnf"``.
         cnf_train_steps: Number of Adam steps taken every time the CNF is fine-tuned on
-            the buffer. Defaults to ``100``.
-        cnf_batch_size: Mini-batch size used when fine-tuning the CNF. Defaults to
-            ``256``. If the buffer has fewer points, the entire buffer is used.
+            the buffer.
+        cnf_batch_size: Mini-batch size used when fine-tuning the CNF. If the buffer has
+            fewer points, the entire buffer is used.
         cnf_min_buffer_size: Minimum number of points in the buffer before the CNF is
             trained. Before this threshold, the flow stays untrained and density queries
-            return zeros. Defaults to ``128``.
+            return zeros.
         cnf_device: Torch device on which the CNF lives when ``density_method="cnf"``.
-            Defaults to ``"cpu"``.
         seed: Value to seed the random number generator. Set to None to avoid a fixed
             seed.
         measures_dtype: Data type of the measures. Defaults to float64 (numpy's default
@@ -297,8 +307,8 @@ class DensityArchive(ArchiveBase):
         sklearn_kwargs: dict | None = None,
         cnf_kwargs: dict | None = None,
         cnf_lr: Float = 1e-3,
-        cnf_train_steps: Int = 100,
-        cnf_batch_size: Int = 256,
+        cnf_train_steps: Int = 5,
+        cnf_batch_size: Int = 32,
         cnf_min_buffer_size: Int = 128,
         cnf_device: torch.device = "cpu",
         seed: Int | None = None,
