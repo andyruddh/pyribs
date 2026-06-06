@@ -834,6 +834,7 @@ def test_lc_add_batch_replace_same_cell():
 
 
 def test_add_novel_and_not_novel_no_improve_bug():
+    """See https://github.com/icaros-usc/pyribs/pull/704/."""
     archive = ProximityArchive(
         solution_dim=3,
         measure_dim=2,
@@ -864,4 +865,145 @@ def test_add_novel_and_not_novel_no_improve_bug():
         solution_batch=[[1, 1, 1], [3, 3, 3]],
         objective_batch=[10.0, 10.0],
         measures_batch=[[0, 0], [5.0, 5.0]],
+    )
+
+
+def test_add_non_novel_solution_threshold_decay():
+    """novelty_threshold decays when no novel solutions are added."""
+    iterations = 5
+    initial_threshold = 1.0
+    archive = ProximityArchive(
+        solution_dim=3,
+        measure_dim=2,
+        k_neighbors=1,
+        novelty_threshold=initial_threshold,
+        initial_capacity=1,
+        threshold_decay_rate=0.5,
+        threshold_decay_itrs=iterations,
+    )
+    assert_allclose(archive.novelty_threshold, 1.0)
+    archive.add_single([1, 2, 3], None, [0, 0])
+
+    for _ in range(iterations):
+        assert_allclose(archive.novelty_threshold, 1.0)
+        # Should not be added since threshold is 1.0.
+        add_info = archive.add_single([1, 2, 3], None, [0.5, 0])
+        assert add_info["status"] == 0
+        assert_allclose(add_info["novelty"], 0.5)
+
+    # At this point, novelty_threshold must have been updated to 0.5.
+    assert_allclose(archive.novelty_threshold, 0.5)
+    assert_archive_elites(archive, 1, measures_batch=[[0, 0]])
+
+    # Now when we add the solution, it is accepted.
+    add_info = archive.add_single([1, 2, 3], None, [0.5, 0])
+    assert_archive_elites(archive, 2, measures_batch=[[0, 0], [0.5, 0]])
+
+
+def test_no_threshold_decay_when_adding_novel_solutions():
+    """novelty_threshold remains constant when adding novel solutions."""
+    iterations = 5
+    initial_threshold = 1.0
+    archive = ProximityArchive(
+        solution_dim=3,
+        measure_dim=2,
+        k_neighbors=1,
+        novelty_threshold=initial_threshold,
+        initial_capacity=1,
+        threshold_decay_itrs=iterations,
+        threshold_decay_rate=0.5,
+    )
+    assert_allclose(archive.novelty_threshold, 1.0)
+    inner_measures = np.arange(iterations)
+    new_measures = np.stack([inner_measures, inner_measures], axis=1)
+
+    for m in new_measures:
+        add_info = archive.add_single([1, 2, 3], None, m)
+        # The solution was added to the archive.
+        assert add_info["status"] == 2
+        # The threshold must remain the same --> 1.0
+        assert_allclose(archive.novelty_threshold, 1.0)
+
+    assert_archive_elites(archive, iterations, measures_batch=new_measures)
+    assert_allclose(archive.novelty_threshold, 1.0)
+
+
+def test_mix_novel_and_not_novel_for_threshold_decay():
+    """novelty_threshold responds correctly when we mix novel and not novel
+    solutions."""
+    iterations = 5
+    initial_threshold = 1.0
+    archive = ProximityArchive(
+        solution_dim=3,
+        measure_dim=2,
+        k_neighbors=1,
+        novelty_threshold=initial_threshold,
+        initial_capacity=1,
+        threshold_decay_itrs=iterations,
+        threshold_decay_rate=0.5,
+    )
+    assert_allclose(archive.novelty_threshold, 1.0)
+
+    # Insert an initial solution with measure [0,0] to have a reference. Thus,
+    # not_novel_measure should never be included.
+    not_novel_measure = [0.5, 0]
+
+    for i in range(iterations * 2):
+        to_insert = np.asarray([i, i]) if i % 2 == 0 else not_novel_measure
+        add_info = archive.add_single([1, 2, 3], None, to_insert)
+        if i % 2 == 0:
+            # We should have inserted a novel solution.
+            assert add_info["status"] == 2
+            # The threshold must remain the same --> 1.0
+            assert_allclose(archive.novelty_threshold, 1.0)
+        else:
+            # This duplicated measure should not be inserted.
+            assert add_info["status"] == 0
+            assert_allclose(archive.novelty_threshold, 1.0)
+
+    assert_allclose(archive.novelty_threshold, 1.0)
+
+
+def test_add_with_threshold_decay():
+    """Since the threshold_decay tests above use add_single, this uses add() for
+    completeness."""
+    iterations = 1
+    initial_threshold = 1.0
+    archive = ProximityArchive(
+        solution_dim=3,
+        measure_dim=2,
+        k_neighbors=1,
+        novelty_threshold=initial_threshold,
+        initial_capacity=1,
+        threshold_decay_itrs=iterations,
+        threshold_decay_rate=0.5,
+    )
+    assert_allclose(archive.novelty_threshold, 1.0)
+
+    add_info = archive.add([[1, 2, 3]], [0.0], [[0.0, 0.0]])
+    assert_equal(add_info["status"], [2])
+    assert_allclose(archive.novelty_threshold, 1.0)
+
+    # One solution is novel enough while the other is not.
+    add_info = archive.add([[4, 5, 6], [7, 8, 9]], [0.0, 0.0], [[0.5, 0.0], [1.0, 0.0]])
+    assert_equal(add_info["status"], [0, 2])
+    assert_allclose(archive.novelty_threshold, 1.0)
+
+    # Neither solution is novel enough, so the threshold decreases immediately.
+    add_info = archive.add(
+        [[10, 11, 12], [13, 14, 15]], [0.0, 0.0], [[1.5, 0.0], [1.75, 0.0]]
+    )
+    assert_equal(add_info["status"], [0, 0])
+    assert_allclose(archive.novelty_threshold, 0.5)
+
+    # Now both solutions can be added.
+    add_info = archive.add(
+        [[10, 11, 12], [13, 14, 15]], [0.0, 0.0], [[1.5, 0.0], [1.75, 0.0]]
+    )
+    assert_equal(add_info["status"], [2, 2])
+    assert_allclose(archive.novelty_threshold, 0.5)
+
+    # Check the elites in the archive.
+    assert_archive_elites(
+        archive, 4, measures_batch=[[0.0, 0.0], [1.0, 0.0], [1.5, 0.0], [1.75, 0.0]]
     )

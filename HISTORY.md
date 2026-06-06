@@ -1,5 +1,13 @@
 # History
 
+## (Forthcoming)
+
+### Changelog
+
+#### API
+
+- Implement `novelty_threshold` decay in `ProximityArchive` ({pr}`709`)
+
 ## 0.11.0
 
 ### Changelog
